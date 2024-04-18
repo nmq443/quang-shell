@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
-#include "path_handle.h"
 
 // main function
 void qsh_loop();
