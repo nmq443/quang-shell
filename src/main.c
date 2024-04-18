@@ -2,14 +2,14 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
+#include "path_handle.h"
 
 // main function
 void qsh_loop();
 
-
 // prompt
 void qsh_prompt();
-
 
 // input
 void qsh_handle_input();
@@ -21,8 +21,8 @@ char *qsh_read_line();
 char **qsh_split_line(char *line);
 
 // execute
-void qsh_execute();
-
+int qsh_execute(char **args);
+int qsh_launch(char **args);
 
 // built-in commands
 // cd, exit, help 
@@ -48,45 +48,6 @@ int qsh_num_builtins()
 	return sizeof(builtin_cmds) / sizeof(char*);
 }
 
-// path handler
-struct node {
-	char *dir;
-	struct node* next;
-};
-
-typedef struct node node;
-
-node *create_path_list(char *path)
-{
-	node *head = NULL;
-	node *tail = NULL;
-
-	// parse the path and split into dirs
-	char* dir = strtok(path, ":");
-	
-	while (dir != NULL)
-	{
-		// new node for dir
-		node *new_node = (node*) malloc (sizeof(node));
-		new_node->dir = dir;
-		new_node->next = NULL;
-
-		// add the new node to the list
-		if (!head)
-		{
-			head = new_node;
-			tail = new_node;
-		} else 
-		{
-			tail->next = new_node;
-			tail = new_node;
-		}
-
-		dir = strtok(NULL, ":");
-	}
-
-	return head;
-}
 
 int main(int argc, char** argv)
 {
@@ -96,16 +57,26 @@ int main(int argc, char** argv)
 
 void qsh_loop()
 {
+	char *line;
+	char **args;
+	int status;
+
 	do {
 		if (isatty(STDIN_FILENO)) // interactive mode
 		{
 			qsh_prompt();			
-			qsh_handle_input();
+			//qsh_handle_input();
+			line = qsh_read_line();
+			args = qsh_split_line(line);
+			status = qsh_execute(args);
+
+			free(line);
+			free(args);
 		} else // non-interactive mode
 		{
 			printf("Non-interactive mode");
 		}
-	} while(1);
+	} while(status);
 }
 
 char* qsh_read_line()
@@ -157,20 +128,16 @@ void qsh_prompt()
 	free(hostname);
 }
 
+/*
 void qsh_handle_input()
 {
 	char *line;
 	char **args;
 
 	line = qsh_read_line();
-	// printf("%s\n", line);
 	args = qsh_split_line(line);
-	for (int i = 0; args[i] != NULL; i++)
-	{
-		printf("%s ", args[i]);
-	}
-	printf("\n");
 }
+*/
 
 #define QSH_TOK_BUFSIZE 512
 #define QSH_TOK_DELIM " \t\r\n\a"
@@ -210,11 +177,6 @@ char **qsh_split_line(char *line)
 	return tokens;
 }
 
-void qsh_execute()
-{
-
-}
-
 int qsh_cd(char **args)
 {
 	if (!args[1])
@@ -249,4 +211,53 @@ int qsh_help(char **args)
 int qsh_exit(char **args)
 {
 	return 0;
+}
+
+int qsh_launch(char **args)
+{
+	pid_t pid, wpid;
+	int status;
+
+	pid = fork();
+	if (pid == 0)
+	{
+		// child process
+		if (execvp(args[0], args) == -1)
+		{
+			perror("qsh");
+		}
+		exit(EXIT_FAILURE);
+	} else if (pid < 0)
+	{
+		// error forking
+		perror("qsh");
+	} else 
+	{
+		// parent process
+		do 
+		{
+			wpid = waitpid(pid, &status, WUNTRACED);
+		} while (!WIFEXITED(status) && !WIFSIGNALED(status));
+	}
+
+	return 1;
+}
+
+int qsh_execute(char **args)
+{
+	if (!args[0])
+	{
+		// empty command
+		return 1;
+	}
+
+	for (int i = 0; i < qsh_num_builtins(); i++)
+	{
+		if (strcmp(args[0], builtin_cmds[i]) == 0)
+		{
+			return (*builtin_func[i])(args);
+		}
+	}
+
+	return qsh_launch(args);
 }
